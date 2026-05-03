@@ -21,6 +21,32 @@ pip install -e .
 
 Requires Python 3.11+. Dependencies are `rich` and `click`. Nothing else.
 
+### macOS
+
+The system Python on macOS is 3.9, which is too old. Install a modern
+Python with Homebrew, then create a virtualenv:
+
+```sh
+brew install python@3.12
+python3.12 -m venv .venv
+.venv/bin/pip install -e .
+.venv/bin/haikala
+```
+
+To put `haikala` (and `python3.12`/`pip`) on your `PATH` instead of
+calling them through `.venv/bin/`, either activate the venv each
+session (`source .venv/bin/activate`) or add Homebrew's unversioned
+shims to your shell:
+
+```sh
+echo 'export PATH="/opt/homebrew/opt/python@3.12/libexec/bin:$PATH"' >> ~/.zshrc
+```
+
+Apple Silicon Macs use `/opt/homebrew`; Intel Macs use `/usr/local`.
+Adjust the path accordingly. The default Terminal and iTerm2 both
+render the mandala correctly — make sure the window is at least 80
+columns wide for the default `huge` size.
+
 ## Use
 
 ```sh
