@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "haikala"
+version = "0.1.0"
+description = "A breathing haiku mandala generator for the terminal."
+readme = "README.md"
+requires-python = ">=3.11"
+authors = [{ name = "haikala" }]
+license = { text = "MIT" }
+dependencies = [
+    "rich>=13.7",
+    "click>=8.1",
+]
+
+[project.optional-dependencies]
+test = ["pytest>=7.4"]
+
+[project.scripts]
+haikala = "haikala.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
