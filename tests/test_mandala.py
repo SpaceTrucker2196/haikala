@@ -110,3 +110,53 @@ def test_render_works_for_every_haiku():
         spec = haiku_to_spec(h)
         grid = render_spec(spec)
         assert grid[len(grid) // 2][len(grid[0]) // 2].glyph != EMPTY
+
+
+def test_vary_breath_renders_without_error():
+    """Per-ring breath path must accept ring index as int (regression)."""
+    spec = haiku_to_spec(haiku_lib.get("old_pond"), size="medium")
+    for t in (0.0, 0.7, 1.5, 3.3):
+        grid = render_spec(spec, t=t, breath_period=10.0, vary_breath=True)
+        # Some glyphs land in the disc.
+        assert any(
+            c.glyph not in (EMPTY, COVERED) for row in grid for c in row
+        )
+
+
+def test_ripple_paints_rings_at_increasing_radii_over_time():
+    """At t≈0 ripple sits near center; at t=period/2 it has moved outward."""
+    spec = haiku_to_spec(haiku_lib.get("old_pond"), size="medium")
+    grid_radius = spec.grid_radius
+
+    def ripple_max_radius(t: float) -> float:
+        from haikala.mandala import _RIPPLE_GLYPH
+        grid = render_spec(spec, t=t, ripple=True, ripple_period=4.0)
+        cx = len(grid[0]) // 2
+        cy = len(grid) // 2
+        max_r = 0.0
+        import math as _math
+        for y, row in enumerate(grid):
+            for x, c in enumerate(row):
+                if c.glyph == _RIPPLE_GLYPH:
+                    r = _math.hypot((x - cx) / 2.0, y - cy)
+                    if r > max_r:
+                        max_r = r
+        return max_r
+
+    early = ripple_max_radius(0.2)
+    late = ripple_max_radius(1.6)
+    # Both should be inside the disc.
+    assert early <= grid_radius
+    assert late <= grid_radius
+    # Later ripple has reached further out (with 2 staggered ripples in
+    # flight, the leading one is past the trailing one).
+    assert late >= early
+
+
+def test_ripple_does_not_overdraw_center():
+    """Ripple must paint into empty cells only — never replace center glyph."""
+    spec = haiku_to_spec(haiku_lib.get("old_pond"), size="medium")
+    grid = render_spec(spec, t=0.0, ripple=True, ripple_period=4.0)
+    cy = len(grid) // 2
+    cx = len(grid[0]) // 2
+    assert grid[cy][cx].glyph == spec.center_glyph

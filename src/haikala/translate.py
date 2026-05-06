@@ -126,8 +126,10 @@ def haiku_to_spec(
     fold: int = 8,
     size: str = DEFAULT_SIZE,
 ) -> MandalaSpec:
-    if fold not in (4, 6, 8, 12):
-        raise ValueError(f"fold must be one of 4, 6, 8, 12; got {fold}")
+    if fold < 4 or fold > 16 or fold % 2 != 0:
+        raise ValueError(
+            f"fold must be an even integer in [4, 16]; got {fold}"
+        )
     if size not in SIZE_RADIUS:
         raise ValueError(f"size must be one of {sorted(SIZE_RADIUS)}; got {size!r}")
     if not haiku.tokens:

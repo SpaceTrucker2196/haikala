@@ -200,36 +200,190 @@ def _paint_background(grid: list[list[Cell]], grid_radius: int) -> None:
             grid[gy][gx] = Cell(ch, None, "dim")
 
 
-def render_spec(spec: MandalaSpec, breath: float = 0.0) -> list[list[Cell]]:
-    """Build the grid for a single frame.
+_FRACTAL_GLYPHS = (" ", " ", "·", "˙", "░", "░", "▒", "▓")
+_FRACTAL_MAX_ITER = len(_FRACTAL_GLYPHS) - 1
 
-    `breath` is in [-1, 1]. 0 is neutral; +1 is full inhale (rings expand
-    slightly, denser); -1 is full exhale (rings contract, sparser/dimmer).
+
+# Vivid 8-stop color ramps inspired by natural light and tone. Each stop maps
+# 1:1 to the iteration count: index 0 is "escaped immediately" (deepest dark),
+# index 7 is "inside the Julia set" (brightest interior).
+FRACTAL_PALETTES: dict[str, tuple[str, ...]] = {
+    # Northern lights: deep night sky → teal → jade → magenta arc.
+    "aurora":   ("#000a1a", "#022040", "#0a4060", "#19828c",
+                 "#2cd9a0", "#7af56a", "#c270ff", "#ffaff0"),
+    # Coals and lava: char → ember → flame → pale gold.
+    "ember":    ("#0a0000", "#2b0500", "#660f00", "#a82800",
+                 "#e65800", "#ff9d20", "#ffd76a", "#fff8d0"),
+    # Deep sea to surf: abyss → sapphire → cyan → foam.
+    "ocean":    ("#000814", "#001d3d", "#003566", "#0077b6",
+                 "#00b4d8", "#48cae4", "#caf0f8", "#ffffff"),
+    # Moss / leaf-canopy / sun-warmed bark.
+    "forest":   ("#0a1f0a", "#15391a", "#2c5a2c", "#4c7a2c",
+                 "#7ea848", "#b8c870", "#e8c878", "#fff0c0"),
+    # Cherry blossom at dawn: plum → rose → blush → white.
+    "sakura":   ("#1a0e1a", "#3a1f30", "#6e3a55", "#a55a7a",
+                 "#dc88a8", "#f5b6cc", "#fcdde6", "#ffffff"),
+    # Dusk sky: ink → indigo → violet → orchid.
+    "twilight": ("#080216", "#1a0a3a", "#36195e", "#5a2887",
+                 "#8e3ec0", "#c266e0", "#ec96f0", "#fcd9ff"),
+    # Volcanic/black-sand beach: obsidian → rust → sulfur → cream.
+    "lava":     ("#050505", "#1a0a05", "#3d1a0a", "#7a2a14",
+                 "#c75028", "#ee8b3a", "#f5cf6a", "#fff5d0"),
+    # Coral reef: deep teal water → coral → peach → bone-white.
+    "coral":    ("#001a1a", "#024040", "#157070", "#3aa8a0",
+                 "#ffb88a", "#ff8466", "#ffd6b0", "#ffffff"),
+}
+
+DEFAULT_FRACTAL_PALETTE = "aurora"
+
+
+def _apply_fractal_field(
+    grid: list[list[Cell]],
+    grid_radius: int,
+    fold: int,
+    t: float,
+    colors: tuple[str, ...],
+) -> None:
+    """Apply a slowly-drifting Julia set to the grid.
+
+    A single pass over every cell:
+      - empty disc cells are filled with a glyph + color from the palette
+        (density gradient: " · ˙ ░ ▒ ▓"), and
+      - already-placed ring/center cells keep their glyph + style but
+        adopt the *same* fractal palette color at their position, so the
+        whole field — backdrop and emoji alike — reads as one varying
+        color landscape driven by the Julia escape time.
+
+    `c` rotates around |c|=0.7885 with a long period for a flowing,
+    organic feel. The cell's angle is folded into one half-sector of
+    the mandala's N-fold symmetry, so the pattern has full dihedral
+    D_fold symmetry — matching the rings.
     """
-    width, height = grid_dims(spec.grid_radius)
-    grid = _new_grid(width, height)
+    if not colors or len(colors) <= _FRACTAL_MAX_ITER:
+        colors = FRACTAL_PALETTES[DEFAULT_FRACTAL_PALETTE]
+    height = len(grid)
+    width = len(grid[0])
     cx = width // 2
     cy = height // 2
+    edge = grid_radius + 0.5
+    scale = 1.5 / max(1.0, grid_radius)
+    drift = 0.05 * t
+    c = complex(0.7885 * math.cos(drift), 0.7885 * math.sin(drift))
+    sector = 2.0 * math.pi / max(1, fold)
+    half = sector / 2.0
+    for gy in range(height):
+        for gx in range(width):
+            cell = grid[gy][gx]
+            if cell.glyph == COVERED:
+                continue
+            rx = (gx - cx) / 2.0
+            ry = gy - cy
+            r = math.hypot(rx, ry)
+            if r > edge:
+                continue
+            # Fold angle into [0, sector/2] for dihedral symmetry.
+            theta = math.atan2(ry, rx) % sector
+            if theta > half:
+                theta = sector - theta
+            z = complex(r * math.cos(theta) * scale, r * math.sin(theta) * scale)
+            i = 0
+            while i < _FRACTAL_MAX_ITER and (z.real * z.real + z.imag * z.imag) < 4.0:
+                z = z * z + c
+                i += 1
+            color = colors[i]
+            if cell.glyph == EMPTY:
+                ch = _FRACTAL_GLYPHS[i]
+                if ch == " ":
+                    continue
+                grid[gy][gx] = Cell(ch, color, "")
+            else:
+                grid[gy][gx] = Cell(cell.glyph, color, cell.style)
 
-    radius_mod = 1.0 + 0.13 * breath
-    density_mod = 1.0 + 0.18 * breath
+
+_RIPPLE_GLYPH = "◌"
+_RIPPLE_COLOR_DEFAULT = "#9ad8ff"
+_RIPPLE_COUNT = 2  # number of expanding rings in flight at once
+
+
+def _styles_for_breath(breath: float) -> tuple[str, str]:
+    """Return (ring_style, center_style) for a breath value in [-1, 1]."""
     if breath < -0.4:
         ring_style = "dim"
     elif breath > 0.4:
         ring_style = "bold"
     else:
         ring_style = ""
-
-    # center pulses subtly: bold near full inhale, dim near full exhale
     if breath > 0.5:
         center_style = "bold"
     elif breath < -0.5:
         center_style = "dim"
     else:
         center_style = ""
+    return ring_style, center_style
+
+
+def _ring_breath(
+    breath_global: float,
+    ring_idx: int,
+    n_rings: int,
+    t: float,
+    breath_period: float,
+    vary: bool,
+) -> float:
+    """Per-ring breath value. With `vary=False`, all rings share the global
+    `breath`. With `vary=True`, each ring runs its own slightly-shifted
+    sinusoid driven by `t` and `breath_period`: inner rings (lower index)
+    breathe a touch faster and the phase cascades outward, so the whole
+    field swells in a soft wave instead of a single synchronized pulse.
+    """
+    if not vary or breath_period <= 0:
+        return breath_global
+    span = max(1, n_rings - 1)
+    # ring_idx is 0 for innermost ring, n_rings-1 for outermost. Inner →
+    # faster speed; outer → slower. ±10% spread.
+    speed = 1.0 + 0.10 * (1.0 - 2.0 * ring_idx / span)
+    phase = 0.45 * ring_idx  # radians; cascades outward
+    return math.sin(2.0 * math.pi * t * speed / breath_period + phase)
+
+
+def render_spec(
+    spec: MandalaSpec,
+    breath: float = 0.0,
+    t: float = 0.0,
+    breath_period: float = 10.0,
+    vary_breath: bool = False,
+    ripple: bool = False,
+    ripple_period: float = 4.0,
+    fractal: bool = False,
+    fractal_colors: tuple[str, ...] | None = None,
+) -> list[list[Cell]]:
+    """Build the grid for a single frame.
+
+    `breath` is in [-1, 1]. 0 is neutral; +1 is full inhale (rings expand
+    slightly, denser); -1 is full exhale (rings contract, sparser/dimmer).
+    `t` is wall-clock seconds since animation start.
+    With `vary_breath=True`, each ring computes its own breath from `t`
+    and `breath_period` (slight per-ring speed and phase variation).
+    With `ripple=True`, transient rings sweep outward from the center on
+    `ripple_period` seconds, painted only into empty space so they do not
+    overdraw any haiku glyph.
+    """
+    width, height = grid_dims(spec.grid_radius)
+    grid = _new_grid(width, height)
+    cx = width // 2
+    cy = height // 2
+
+    n_rings = len(spec.rings)
+    # Center uses the *global* breath so it pulses with the overall feel,
+    # regardless of per-ring variation.
+    _, center_style = _styles_for_breath(breath)
     _place(grid, cx, cy, spec.center_glyph, spec.center_color, center_style)
 
-    for ring in spec.rings:
+    for ring_idx, ring in enumerate(spec.rings):
+        rb = _ring_breath(breath, ring_idx, n_rings, t, breath_period, vary_breath)
+        radius_mod = 1.0 + 0.13 * rb
+        density_mod = 1.0 + 0.18 * rb
+        ring_style, _ = _styles_for_breath(rb)
         r_eff = ring.radius * radius_mod
         if r_eff < 0.5:
             continue
@@ -248,8 +402,54 @@ def render_spec(spec: MandalaSpec, breath: float = 0.0) -> list[list[Cell]]:
                 glyph = ring.glyphs[k % len(ring.glyphs)]
                 _place(grid, x, y, glyph, ring.color, ring_style)
 
-    _paint_background(grid, spec.grid_radius)
+    if ripple and ripple_period > 0:
+        _paint_ripple(
+            grid, spec.grid_radius, spec.fold, t, ripple_period,
+        )
+
+    if fractal:
+        colors = fractal_colors or FRACTAL_PALETTES[DEFAULT_FRACTAL_PALETTE]
+        _apply_fractal_field(grid, spec.grid_radius, spec.fold, t, colors=colors)
+    else:
+        _paint_background(grid, spec.grid_radius)
     return grid
+
+
+def _paint_ripple(
+    grid: list[list[Cell]],
+    grid_radius: int,
+    fold: int,
+    t: float,
+    ripple_period: float,
+) -> None:
+    """Lay transient ripple rings into empty cells.
+
+    `_RIPPLE_COUNT` rings are kept in flight at once, evenly staggered in
+    phase so there is always one mid-sweep — like ongoing ripples on a
+    pond. Each ring's radius is `phase_k * grid_radius`, with phase_k =
+    ((t / period) + k / count) mod 1. Glyphs are placed only into EMPTY
+    cells, so no haiku content is overdrawn; if `--fractal` is on, the
+    fractal pass will recolor these cells along with everything else.
+    """
+    height = len(grid)
+    width = len(grid[0])
+    cx = width // 2
+    cy = height // 2
+    base_phase = (t / ripple_period) % 1.0
+    for k in range(_RIPPLE_COUNT):
+        phase = (base_phase + k / _RIPPLE_COUNT) % 1.0
+        r_eff = phase * (grid_radius - 0.5)
+        if r_eff < 0.5:
+            continue
+        # Soft fade as the ripple approaches the rim.
+        fade = "" if phase < 0.85 else "dim"
+        n = _positions_per_sector(r_eff, fold)
+        for sector in range(fold):
+            for j in range(n):
+                theta = 2.0 * math.pi * (sector * n + j) / (fold * n)
+                x = round(cx + r_eff * math.cos(theta) * 2.0)
+                y = round(cy + r_eff * math.sin(theta))
+                _place(grid, x, y, _RIPPLE_GLYPH, _RIPPLE_COLOR_DEFAULT, fade)
 
 
 def grid_to_plain(grid: list[list[Cell]]) -> str:

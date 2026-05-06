@@ -11,6 +11,8 @@ from rich.table import Table
 
 from . import haiku as haiku_lib
 from .animate import animate, render_static
+from .mandala import DEFAULT_FRACTAL_PALETTE, FRACTAL_PALETTES
+from .palette import fold_for_haiku, palette_from_haiku
 from .translate import DEFAULT_SIZE, haiku_to_spec
 
 
@@ -33,10 +35,11 @@ from .translate import DEFAULT_SIZE, haiku_to_spec
 )
 @click.option(
     "--fold",
-    type=click.Choice(["4", "6", "8", "12"]),
-    default="8",
+    type=click.Choice(["auto", "4", "6", "8", "10", "12", "14", "16"]),
+    default="auto",
     show_default=True,
-    help="Rotational symmetry order.",
+    help="Rotational symmetry order. 'auto' picks an even fold from the "
+         "haiku's word and token counts (capped at 16).",
 )
 @click.option(
     "--bpm",
@@ -66,6 +69,47 @@ from .translate import DEFAULT_SIZE, haiku_to_spec
     default=None,
     help="Seed for random haiku selection (deterministic).",
 )
+@click.option(
+    "--cycle/--no-cycle",
+    default=False,
+    show_default=True,
+    help="Slowly rotate ring colors through the hue wheel during animation.",
+)
+@click.option(
+    "--cycle-period",
+    type=click.FloatRange(5.0, 600.0),
+    default=90.0,
+    show_default=True,
+    help="Seconds for one full hue rotation when --cycle is on.",
+)
+@click.option(
+    "--fractal/--no-fractal",
+    default=False,
+    show_default=True,
+    help="Use a slowly-drifting Julia set as the background instead of dot fill.",
+)
+@click.option(
+    "--palette",
+    type=click.Choice(["auto", *sorted(FRACTAL_PALETTES.keys())]),
+    default="auto",
+    show_default=True,
+    help="Color palette for the fractal background. 'auto' derives one "
+         "from words found in the haiku; named palettes force a specific "
+         "ramp.",
+)
+@click.option(
+    "--ripple/--no-ripple",
+    default=False,
+    show_default=True,
+    help="Sweep transient rings outward from center (during --animate).",
+)
+@click.option(
+    "--ripple-period",
+    type=click.FloatRange(0.5, 60.0),
+    default=4.0,
+    show_default=True,
+    help="Seconds for one ripple to travel from center to rim.",
+)
 def main(
     list_haiku: bool,
     haiku_id: str | None,
@@ -75,6 +119,12 @@ def main(
     animate_flag: bool,
     size: str,
     seed: int | None,
+    cycle: bool,
+    cycle_period: float,
+    fractal: bool,
+    palette: str,
+    ripple: bool,
+    ripple_period: float,
 ) -> None:
     """haikala — a haiku mandala generator."""
     console = Console()
@@ -87,13 +137,25 @@ def main(
     if haiku is None:
         sys.exit(1)
 
-    spec = haiku_to_spec(haiku, fold=int(fold), size=size)
+    fold_int = fold_for_haiku(haiku) if fold == "auto" else int(fold)
+    spec = haiku_to_spec(haiku, fold=fold_int, size=size)
+
+    if palette == "auto":
+        fractal_colors = palette_from_haiku(haiku) or FRACTAL_PALETTES[DEFAULT_FRACTAL_PALETTE]
+    else:
+        fractal_colors = FRACTAL_PALETTES[palette]
 
     if animate_flag:
-        animate(spec, haiku, bpm=bpm, console=console)
+        animate(
+            spec, haiku,
+            bpm=bpm, console=console,
+            cycle=cycle, cycle_period=cycle_period,
+            fractal=fractal, fractal_colors=fractal_colors,
+            ripple=ripple, ripple_period=ripple_period,
+        )
         return
 
-    render_static(spec, haiku, console)
+    render_static(spec, haiku, console, fractal=fractal, fractal_colors=fractal_colors)
 
 
 def _select_haiku(

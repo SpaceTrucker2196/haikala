@@ -96,14 +96,14 @@ def test_ring_radii_increase_with_band():
         last_radius = ring.radius
 
 
-@pytest.mark.parametrize("fold", [4, 6, 8, 12])
+@pytest.mark.parametrize("fold", [4, 6, 8, 10, 12, 14, 16])
 def test_supported_folds(fold):
     h = haiku_lib.get("old_pond")
     spec = haiku_to_spec(h, fold=fold)
     assert spec.fold == fold
 
 
-@pytest.mark.parametrize("fold", [3, 5, 7, 0, -1, 16])
+@pytest.mark.parametrize("fold", [3, 5, 7, 0, -1, 18, 20])
 def test_invalid_folds_raise(fold):
     h = haiku_lib.get("old_pond")
     with pytest.raises(ValueError):
