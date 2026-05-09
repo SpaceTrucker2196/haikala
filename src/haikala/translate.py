@@ -10,7 +10,7 @@ import math
 from dataclasses import dataclass
 
 from .haiku import Haiku, Season
-from .symbols import glyphs_for
+from .symbols import glyphs_for, text_glyphs_for
 
 
 @dataclass(frozen=True)
@@ -22,6 +22,7 @@ class Ring:
     band: str                # "inner" | "middle" | "outer"
     shape: str = "circle"    # "circle" | "polygon" | "star" | "petal"
     phase: float = 0.0       # rotational offset in radians (breaks "spokes")
+    bg_color: str | None = None  # cell background tint (used in --no-emoji)
 
 
 @dataclass(frozen=True)
@@ -125,6 +126,7 @@ def haiku_to_spec(
     haiku: Haiku,
     fold: int = 8,
     size: str = DEFAULT_SIZE,
+    no_emoji: bool = False,
 ) -> MandalaSpec:
     if fold < 4 or fold > 16 or fold % 2 != 0:
         raise ValueError(
@@ -138,12 +140,40 @@ def haiku_to_spec(
     palette = PALETTES[haiku.season]
     grid_radius = SIZE_RADIUS[size]
 
+    glyph_picker = text_glyphs_for if no_emoji else glyphs_for
+
     center_token = haiku.tokens[0]
-    center_glyph = glyphs_for(center_token)[0]
+    center_glyph = glyph_picker(center_token)[0]
     center_color = palette[0]
 
+    # In --no-emoji mode each ring also gets a background-color tint from
+    # the season palette, so block/dingbat glyphs build colorful "patches"
+    # rather than thin colored outlines. Pick bg from a position offset
+    # from fg in the palette so the two contrast.
+    def bg_for(idx: int) -> str | None:
+        if not no_emoji:
+            return None
+        return palette[(idx + 2) % len(palette)]
+
+    # Buddhist mandala — lotus throne. A tight ring of `fold` petals just
+    # outside the bindu, inside the inner band. Modeled after the
+    # padma/lotus that surrounds the central deity in Tibetan and Indo-
+    # Tibetan mandalas. Phase is offset by half a sector so petals sit
+    # between the inner band's spokes rather than aligning with them.
+    lotus_radius = max(1.4, 0.16 * grid_radius)
+    lotus_throne = Ring(
+        radius=lotus_radius,
+        glyphs=("❀",),
+        density=1.0,
+        color=palette[1 % len(palette)],
+        band="inner",
+        shape="circle",
+        phase=math.pi / fold,
+        bg_color=bg_for(0),
+    )
+
     bands = _classify(haiku.tokens)
-    rings: list[Ring] = []
+    rings: list[Ring] = [lotus_throne]
     color_cycle = palette[1:] + (palette[0],)
     # Shape per band: inner gets a strong polygon (tetra/hexa/octa/dodecahedral
     # cross-section depending on `fold`), middle gets soft petals, outer gets
@@ -174,12 +204,13 @@ def haiku_to_spec(
             ring_idx += 1
             rings.append(Ring(
                 radius=r,
-                glyphs=glyphs_for(tok),
+                glyphs=glyph_picker(tok),
                 density=_band_density(band_name),
                 color=color,
                 band=band_name,
                 shape=shape,
                 phase=phase,
+                bg_color=bg_for(ring_idx),
             ))
 
     return MandalaSpec(

@@ -242,6 +242,29 @@ def glyphs_for(token: str) -> tuple[str, ...]:
 _VS16 = "️"  # variation selector-16: "render preceding char with emoji presentation"
 
 
+def is_emoji(glyph: str) -> bool:
+    """Return True if the glyph is rendered with emoji (color bitmap)
+    presentation, which most terminals draw with their own embedded
+    palette — ignoring our `cell.color` and `cell.bg_color`. Emoji are
+    detected via VS-16 or by codepoint in the SMP emoji/pictograph planes.
+    BMP geometric/dingbat symbols (✦ ❀ ◯ …) are *not* emoji and remain
+    selectable in `--no-emoji` mode because they honor ANSI styling.
+    """
+    if _VS16 in glyph:
+        return True
+    for ch in glyph:
+        if ord(ch) >= 0x1F300:
+            return True
+    return False
+
+
+def text_glyphs_for(token: str) -> tuple[str, ...]:
+    """Like `glyphs_for`, but with emoji entries removed. Falls back to a
+    generic outline circle if a token's vocabulary is entirely emoji."""
+    filtered = tuple(g for g in glyphs_for(token) if not is_emoji(g))
+    return filtered or ("◯",)
+
+
 def is_wide(glyph: str) -> bool:
     """Return True if the glyph occupies two terminal columns.
 

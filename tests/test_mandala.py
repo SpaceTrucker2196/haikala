@@ -153,6 +153,48 @@ def test_ripple_paints_rings_at_increasing_radii_over_time():
     assert late >= early
 
 
+def test_spin_changes_ring_glyph_positions_over_time():
+    """Kaleidoscope spin must rotate ring placements between frames."""
+    spec = haiku_to_spec(haiku_lib.get("old_pond"), size="medium")
+
+    def ring_signature(t: float) -> frozenset:
+        grid = render_spec(spec, t=t, spin=True, spin_period=8.0)
+        # Use a mid-disc band of cells to detect rotation; ignore center +
+        # background to keep the signature focused on ring glyphs.
+        cy = len(grid) // 2
+        cx = len(grid[0]) // 2
+        out = set()
+        for y, row in enumerate(grid):
+            for x, c in enumerate(row):
+                if c.glyph in (EMPTY, COVERED):
+                    continue
+                # Skip the center cell.
+                if y == cy and x == cx:
+                    continue
+                out.add((y, x, c.glyph))
+        return frozenset(out)
+
+    s0 = ring_signature(0.0)
+    s_quarter = ring_signature(2.0)  # quarter period in
+    assert s0 != s_quarter, "spin produced identical frames over 2s"
+
+
+def test_spin_off_is_deterministic_at_different_t():
+    """With spin off, ring positions don't depend on t (only breath/fractal)."""
+    spec = haiku_to_spec(haiku_lib.get("old_pond"), size="medium")
+
+    def ring_positions(t: float) -> frozenset:
+        grid = render_spec(spec, t=t, spin=False, breath=0.0)
+        out = set()
+        for y, row in enumerate(grid):
+            for x, c in enumerate(row):
+                if c.glyph not in (EMPTY, COVERED):
+                    out.add((y, x, c.glyph))
+        return frozenset(out)
+
+    assert ring_positions(0.0) == ring_positions(5.0)
+
+
 def test_ripple_does_not_overdraw_center():
     """Ripple must paint into empty cells only — never replace center glyph."""
     spec = haiku_to_spec(haiku_lib.get("old_pond"), size="medium")

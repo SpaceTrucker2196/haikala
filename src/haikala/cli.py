@@ -110,6 +110,44 @@ from .translate import DEFAULT_SIZE, haiku_to_spec
     show_default=True,
     help="Seconds for one ripple to travel from center to rim.",
 )
+@click.option(
+    "--spin/--no-spin",
+    default=False,
+    show_default=True,
+    help="Kaleidoscope mode: rings rotate at varying rates (alternating "
+         "directions) and the fractal symmetry axes turn with them.",
+)
+@click.option(
+    "--spin-period",
+    type=click.FloatRange(2.0, 600.0),
+    default=30.0,
+    show_default=True,
+    help="Seconds for the innermost ring to make one full revolution.",
+)
+@click.option(
+    "--no-emoji/--emoji",
+    "no_emoji",
+    default=False,
+    show_default=True,
+    help="Replace emoji with colorable Unicode glyphs (block / dingbat / "
+         "geometric) and add cell background tints — built from ANSI/256/"
+         "truecolor that emoji can't honor.",
+)
+@click.option(
+    "--emanate/--no-emanate",
+    default=False,
+    show_default=True,
+    help="Hue waves radiate outward from the center; each successive "
+         "wave has a different angular symmetry. Cells outside the wave "
+         "keep their original colors.",
+)
+@click.option(
+    "--emanate-period",
+    type=click.FloatRange(0.5, 60.0),
+    default=5.0,
+    show_default=True,
+    help="Seconds for one emanating wave to travel from center to rim.",
+)
 def main(
     list_haiku: bool,
     haiku_id: str | None,
@@ -125,6 +163,11 @@ def main(
     palette: str,
     ripple: bool,
     ripple_period: float,
+    spin: bool,
+    spin_period: float,
+    no_emoji: bool,
+    emanate: bool,
+    emanate_period: float,
 ) -> None:
     """haikala — a haiku mandala generator."""
     console = Console()
@@ -138,7 +181,7 @@ def main(
         sys.exit(1)
 
     fold_int = fold_for_haiku(haiku) if fold == "auto" else int(fold)
-    spec = haiku_to_spec(haiku, fold=fold_int, size=size)
+    spec = haiku_to_spec(haiku, fold=fold_int, size=size, no_emoji=no_emoji)
 
     if palette == "auto":
         fractal_colors = palette_from_haiku(haiku) or FRACTAL_PALETTES[DEFAULT_FRACTAL_PALETTE]
@@ -152,6 +195,8 @@ def main(
             cycle=cycle, cycle_period=cycle_period,
             fractal=fractal, fractal_colors=fractal_colors,
             ripple=ripple, ripple_period=ripple_period,
+            spin=spin, spin_period=spin_period,
+            emanate=emanate, emanate_period=emanate_period,
         )
         return
 

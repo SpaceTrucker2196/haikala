@@ -32,6 +32,8 @@ class Cell:
     glyph: str
     color: str | None = None
     style: str = ""           # "" | "dim" | "bold"
+    static: bool = False      # backdrop cells: don't hue-cycle, don't redraw
+    bg_color: str | None = None  # ANSI/truecolor cell background tint
 
 
 def grid_dims(grid_radius: int) -> tuple[int, int]:
@@ -116,6 +118,7 @@ def _place(
     glyph: str,
     color: str | None,
     style: str = "",
+    bg_color: str | None = None,
 ) -> bool:
     height = len(grid)
     if not (0 <= y < height):
@@ -131,7 +134,7 @@ def _place(
             return False
         if grid[y][x + 1].glyph != EMPTY:
             return False
-    grid[y][x] = Cell(glyph, color, style)
+    grid[y][x] = Cell(glyph, color, style, bg_color=bg_color)
     if wide:
         grid[y][x + 1] = Cell(COVERED, None, "")
     return True
@@ -243,6 +246,7 @@ def _apply_fractal_field(
     fold: int,
     t: float,
     colors: tuple[str, ...],
+    spin_angle: float = 0.0,
 ) -> None:
     """Apply a slowly-drifting Julia set to the grid.
 
@@ -281,8 +285,9 @@ def _apply_fractal_field(
             r = math.hypot(rx, ry)
             if r > edge:
                 continue
-            # Fold angle into [0, sector/2] for dihedral symmetry.
-            theta = math.atan2(ry, rx) % sector
+            # Rotate by the kaleidoscope's prism angle (no-op when spin_angle
+            # is 0), then fold into [0, sector/2] for dihedral symmetry.
+            theta = (math.atan2(ry, rx) - spin_angle) % sector
             if theta > half:
                 theta = sector - theta
             z = complex(r * math.cos(theta) * scale, r * math.sin(theta) * scale)
@@ -297,12 +302,30 @@ def _apply_fractal_field(
                     continue
                 grid[gy][gx] = Cell(ch, color, "")
             else:
-                grid[gy][gx] = Cell(cell.glyph, color, cell.style)
+                grid[gy][gx] = Cell(
+                    cell.glyph, color, cell.style,
+                    static=cell.static, bg_color=cell.bg_color,
+                )
 
 
 _RIPPLE_GLYPH = "◌"
 _RIPPLE_COLOR_DEFAULT = "#9ad8ff"
 _RIPPLE_COUNT = 2  # number of expanding rings in flight at once
+
+# Kaleidoscope tuning. Inner-most ring spins fastest in one direction; each
+# successive ring is slower and reversed, so the layers tumble like loose
+# beads in a turning prism. The fractal symmetry axes rotate at the same
+# fraction of the base rate, dragging the backdrop along with the rings.
+_SPIN_RING_FALLOFF = 0.32   # each ring slower than the previous by this much
+_SPIN_FIELD_FRACTION = 0.35  # fractal symmetry rotation rate (× base rate)
+
+
+def _spin_speed_for_ring(ring_idx: int) -> float:
+    """Per-ring kaleidoscope rotation rate. Alternates sign so adjacent rings
+    counter-rotate; magnitude shrinks geometrically by `_SPIN_RING_FALLOFF`.
+    """
+    sign = -1.0 if (ring_idx % 2 == 1) else 1.0
+    return sign * (1.0 - _SPIN_RING_FALLOFF) ** ring_idx
 
 
 def _styles_for_breath(breath: float) -> tuple[str, str]:
@@ -356,6 +379,8 @@ def render_spec(
     ripple_period: float = 4.0,
     fractal: bool = False,
     fractal_colors: tuple[str, ...] | None = None,
+    spin: bool = False,
+    spin_period: float = 30.0,
 ) -> list[list[Cell]]:
     """Build the grid for a single frame.
 
@@ -367,6 +392,11 @@ def render_spec(
     With `ripple=True`, transient rings sweep outward from the center on
     `ripple_period` seconds, painted only into empty space so they do not
     overdraw any haiku glyph.
+    With `spin=True`, the whole figure becomes a kaleidoscope: each ring
+    rotates at its own rate (alternating direction, geometric falloff),
+    and the fractal's symmetry axes rotate at a fraction of the base
+    rate — like a turning prism tube where loose elements counter-rotate
+    inside the housing.
     """
     width, height = grid_dims(spec.grid_radius)
     grid = _new_grid(width, height)
@@ -379,6 +409,8 @@ def render_spec(
     _, center_style = _styles_for_breath(breath)
     _place(grid, cx, cy, spec.center_glyph, spec.center_color, center_style)
 
+    base_spin = (2.0 * math.pi * t / spin_period) if (spin and spin_period > 0) else 0.0
+
     for ring_idx, ring in enumerate(spec.rings):
         rb = _ring_breath(breath, ring_idx, n_rings, t, breath_period, vary_breath)
         radius_mod = 1.0 + 0.13 * rb
@@ -390,17 +422,22 @@ def render_spec(
         n = _positions_per_sector(r_eff, spec.fold)
         density_eff = max(0.05, min(1.0, ring.density * density_mod))
         sel = _selected_indices(n, density_eff)
+        ring_spin = base_spin * _spin_speed_for_ring(ring_idx)
 
         for sector in range(spec.fold):
             for k in sel:
-                theta = 2.0 * math.pi * (sector * n + k) / (spec.fold * n) + ring.phase
+                theta = (
+                    2.0 * math.pi * (sector * n + k) / (spec.fold * n)
+                    + ring.phase
+                    + ring_spin
+                )
                 # Apply the shape function in the ring's own (un-rotated)
                 # frame, then place at the rotated angle.
-                r_at = _shape_radius(ring.shape, r_eff, spec.fold, theta - ring.phase)
+                r_at = _shape_radius(ring.shape, r_eff, spec.fold, theta - ring.phase - ring_spin)
                 x = round(cx + r_at * math.cos(theta) * 2.0)
                 y = round(cy + r_at * math.sin(theta))
                 glyph = ring.glyphs[k % len(ring.glyphs)]
-                _place(grid, x, y, glyph, ring.color, ring_style)
+                _place(grid, x, y, glyph, ring.color, ring_style, bg_color=ring.bg_color)
 
     if ripple and ripple_period > 0:
         _paint_ripple(
@@ -409,7 +446,11 @@ def render_spec(
 
     if fractal:
         colors = fractal_colors or FRACTAL_PALETTES[DEFAULT_FRACTAL_PALETTE]
-        _apply_fractal_field(grid, spec.grid_radius, spec.fold, t, colors=colors)
+        field_spin = base_spin * _SPIN_FIELD_FRACTION
+        _apply_fractal_field(
+            grid, spec.grid_radius, spec.fold, t, colors=colors,
+            spin_angle=field_spin,
+        )
     else:
         _paint_background(grid, spec.grid_radius)
     return grid

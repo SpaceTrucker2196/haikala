@@ -76,9 +76,11 @@ def test_palette_matches_season():
 
 
 def test_ring_count_matches_non_center_tokens():
+    """Each non-center token gets a ring, plus the fixed lotus throne ring."""
     for h in haiku_lib.HAIKU:
         spec = haiku_to_spec(h)
-        assert len(spec.rings) == len(h.tokens) - 1
+        # 1 lotus throne + (len(tokens) - 1) content rings.
+        assert len(spec.rings) == len(h.tokens)
 
 
 def test_ring_radii_increase_with_band():
@@ -108,6 +110,38 @@ def test_invalid_folds_raise(fold):
     h = haiku_lib.get("old_pond")
     with pytest.raises(ValueError):
         haiku_to_spec(h, fold=fold)
+
+
+def test_no_emoji_strips_emoji_from_every_ring():
+    """With no_emoji=True, no ring glyph should be in the SMP emoji range."""
+    from haikala.symbols import is_emoji
+    for h in haiku_lib.HAIKU:
+        spec = haiku_to_spec(h, no_emoji=True)
+        for ring in spec.rings:
+            for g in ring.glyphs:
+                assert not is_emoji(g), (
+                    f"{h.id}: ring still has emoji glyph {g!r}"
+                )
+        assert not is_emoji(spec.center_glyph), (
+            f"{h.id}: center glyph {spec.center_glyph!r} is still emoji"
+        )
+
+
+def test_no_emoji_assigns_bg_color_to_rings():
+    """In no_emoji mode every ring carries a bg_color so cells render as
+    color patches rather than thin glyph outlines."""
+    h = haiku_lib.get("old_pond")
+    spec = haiku_to_spec(h, no_emoji=True)
+    for ring in spec.rings:
+        assert ring.bg_color, f"ring missing bg_color: {ring}"
+
+
+def test_emoji_mode_leaves_bg_color_unset():
+    """Default (emoji) mode keeps bg_color None to preserve existing look."""
+    h = haiku_lib.get("old_pond")
+    spec = haiku_to_spec(h, no_emoji=False)
+    for ring in spec.rings:
+        assert ring.bg_color is None
 
 
 @pytest.mark.parametrize("size", ["small", "medium", "large", "huge"])
